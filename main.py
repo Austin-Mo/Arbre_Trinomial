@@ -85,79 +85,57 @@ def create_first_nodes(root_node, market, model, tree_alpha, date):
     root_node.next_mid = Node(fwd_price)
     root_node.next_down = Node(fwd_price / tree_alpha)
 
+    # Lier les noeuds up et down des noeuds crées
+    link_up_down(root_node)
+
+
+def link_up_down(node):
     # Relier les noeuds up et down au noeud central.
-    root_node.next_up.node_down = root_node.next_mid
-    root_node.next_down.node_up = root_node.next_mid
+    node.next_up.node_down = node.next_mid
+    node.next_down.node_up = node.next_mid
     # Relier le up et down du noeud mid
-    root_node.next_mid.node_up = root_node.next_up
-    root_node.next_mid.node_down = root_node.next_down
+    node.next_mid.node_up = node.next_up
+    node.next_mid.node_down = node.next_down
 
 
-def create_nodes_up(node, market, model, tree_alpha, date):
-    # Continuer tant que l'on a des noeuds au dessus et dessous
-    while node.node_up is not None:
-        # Récupérer le noeuds au-dessus du noeud actuel
-        node_up = node.node_up
-        # Calculer les prix forward pour ce noeud
-        up_fwd_price = node_up.forward(market, model, date)
+def create_nodes(node, market, model, tree_alpha, date, direction='up'):
+    next_direction = "next_" + direction
+    node_direction = "node_" + direction
+    opposite_direction = "down" if direction == "up" else "up"
 
-        check_node = node.next_up
+    while getattr(node, node_direction) is not None:
+        current_node = getattr(node, node_direction)
+        fwd_price = current_node.forward(market, model, date)
+
+        check_node = getattr(node, next_direction)
         check = 0
         while check == 0:
-            # Check si noeud proche d'un autre
-            check = is_close(check_node, up_fwd_price)
+            check = is_close(check_node, fwd_price)
             if check == 1:
-                # Relier les noeuds en fonction du noeud close
-                node_up.next_mid = check_node
-                node_up.next_down = check_node.node_down
-                if check_node.node_up is None:
-                    up_fwd_price = check_node.spot
-                    node_up.next_up = Node(up_fwd_price * tree_alpha)
-                    # Relier le noeud de base au nouveau noeud
-                    check_node.node_up = node_up.next_up
-                    node_up.next_up.node_down = check_node
+                setattr(current_node, "next_mid", check_node)
+                setattr(current_node, next_direction, getattr(check_node, node_direction))
+
+                if getattr(check_node, node_direction) is None:
+                    if direction == "up":
+                        new_node = Node(check_node.spot * tree_alpha)
+                    else:
+                        new_node = Node(check_node.spot / tree_alpha)
+                    setattr(current_node, next_direction, new_node)
+                    setattr(new_node, "node_" + opposite_direction, check_node)
+                    setattr(check_node, "node_" + direction, new_node)
                 else:
-                    node_up.next_up = check_node.next_up.node_up
+                    setattr(current_node, next_direction, getattr(check_node, next_direction))
             else:
-                check_node = check_node.node_down
-        node = node_up
-
-
-def create_nodes_down(node, market, model, tree_alpha, date):
-    # Continuer tant que l'on a des noeuds en dessous
-    while node.node_down is not None:
-        # Récupérer le noeuds au-dessus du noeud actuel.
-        node_down = node.node_down
-        # Calculer les prix forward pour ce noeud
-        down_fwd_price = node_down.forward(market, model, date)
-
-        check_node = node.next_down
-        check = 0
-        while check == 0:
-            # Check si noeud proche d'un autre
-            check = is_close(check_node, down_fwd_price)
-            if check == 1:
-                # Relier les noeuds en fonction du noeud close
-                node_down.next_mid = check_node
-                node_down.next_up = check_node.node_up
-                if check_node.node_down is None:
-                    down_fwd_price = check_node.spot
-                    node_down.next_down = Node(down_fwd_price / tree_alpha)
-                    # Relier le noeud de base au nouveau noeud
-                    check_node.node_down = node_down.next_down
-                    node_down.next_down.node_up = check_node
-                else:
-                    node_down.next_down = check_node.next_down.node_down
-            else:
-                check_node = check_node.node_down
-        node = node_down
+                check_node = getattr(check_node, "node_" + direction)
+                check = 1
+        node = current_node
 
 
 def create_next_nodes(root_node, market, model, tree_alpha, date):
 
     create_first_nodes(root_node, market, model, tree_alpha, date)  # création des 3 premiers noeuds
-    create_nodes_up(root_node, market, model, tree_alpha, date)  # création des noeuds du dessus
-    create_nodes_down(root_node, market, model, tree_alpha, date)  # création des noeuds du dessous
+    create_nodes(root_node, market, model, tree_alpha, date, direction='up')  # création des noeuds du dessus
+    create_nodes(root_node, market, model, tree_alpha, date, direction='down')  # création des noeuds du dessous
 
 
 class Tree:
