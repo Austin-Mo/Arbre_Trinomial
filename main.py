@@ -65,6 +65,10 @@ class Node:
             fwd_price = self.spot * exp(market.rate * model.t_step)
         return fwd_price
 
+    def variance(self, market, model):
+        var = self.spot**2*exp(2*market.rate*model.t_step)*(exp(market.vol**2*model.t_step)-1)
+        return var
+
 
 def is_close(node, fwd_price):
     up_price = node.spot*((1+tree.alpha)/2)
@@ -103,6 +107,7 @@ def create_nodes(node, market, model, tree_alpha, date, direction='up'):
     node_direction = "node_" + direction
     opposite_direction = "down" if direction == "up" else "up"
 
+    # Boucle pour parcourir tous les noeuds au dessus/dessous du noeud central
     while getattr(node, node_direction) is not None:
         current_node = getattr(node, node_direction)
         fwd_price = current_node.forward(market, model, date)
