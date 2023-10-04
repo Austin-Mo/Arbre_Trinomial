@@ -46,6 +46,9 @@ class Node:
         self.next_down = None
         self.node_up = None
         self.node_down = None
+        self.p_up = None
+        self.p_mid = None
+        self.p_down = None
 
         Node.all_nodes.append(self)
 
