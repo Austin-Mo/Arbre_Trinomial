@@ -21,6 +21,9 @@ class Option:
         self.maturity = datetime.strptime(maturity_date, "%d/%m/%Y").date()
         self.type = option_type
 
+    def payoff(self, spot):
+        return max(spot-self.K, 0)
+
     def parametres(self):
         return self.K, self.maturity, self.type
 
@@ -49,6 +52,7 @@ class Node:
         self.p_up = None
         self.p_mid = None
         self.p_down = None
+        self.pr_opt = None
 
         Node.all_nodes.append(self)
 
@@ -81,6 +85,16 @@ class Node:
         self.p_down = p_down
         self.p_up = p_up
         self.p_mid = p_mid
+
+    def price(self, option):
+        df = tree.discount_factor()
+        if self.next_mid is None:
+            self.pr_opt = option.payoff(self.spot)
+        elif self.pr_opt is None:
+            self.pr_opt = df * (self.p_up * self.next_up.price(option) +
+                              self.p_mid * self.next_mid.price(option) +
+                              self.p_down * self.next_down.price(option))
+        return self.pr_opt
 
 
 def is_close(node, fwd_price):  # Modifier les fonctions pour les mettre dans NODE
@@ -133,6 +147,7 @@ def create_nodes(node, market, model, tree_alpha, date, direction='up'):
             if check == 1:
                 setattr(current_node, "next_mid", check_node)
                 setattr(current_node, next_direction, getattr(check_node, node_direction))
+                setattr(current_node, "next_"+opposite_direction, getattr(check_node, "node_"+opposite_direction))
 
                 if getattr(check_node, node_direction) is None:
                     if direction == "up":
@@ -147,6 +162,8 @@ def create_nodes(node, market, model, tree_alpha, date, direction='up'):
             else:
                 check_node = getattr(check_node, "node_" + direction)
                 check = 1
+        #Calculer proba
+        Node.calculate_proba(node, tree_alpha, market, model)
         node = current_node
     #Calculer proba
     Node.calculate_proba(node, tree_alpha, market, model)
@@ -181,6 +198,8 @@ class Tree:
             i += 1
             date = date + timedelta(days=1)
 
+    def discount_factor(self):
+        return exp(-self.market.rate*self.model.t_step)
 
 # main
 if __name__ == '__main__':
@@ -188,8 +207,8 @@ if __name__ == '__main__':
     dividends = {date(2023, 9, 23): 2, date(2023, 9, 25): 3}
 
     market = Market(0.25, 0.04, 100, dividends)
-    option = Option(102, "19/09/2024", "Call")
-    model = Model(option, "20/09/2023", 3)
+    option = Option(102, "19/09/2024", "Call EU")
+    model = Model(option, "20/09/2023", 200)
     print('Market: ' + str(market.parametres()))
     print('Option: ' + str(option.parametres()))
     print('Model: ' + str(model.parametres()))
@@ -207,5 +226,9 @@ if __name__ == '__main__':
     tree.create_tree(root)
 
     Node.display_all_nodes()  # test
+
+    print("\n")
+    print("Le prix est:" + str(root.price(option)))
+
 
 
