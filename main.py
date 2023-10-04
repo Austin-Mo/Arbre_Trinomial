@@ -72,8 +72,18 @@ class Node:
         var = self.spot**2*exp(2*market.rate*model.t_step)*(exp(market.vol**2*model.t_step)-1)
         return var
 
+    def calculate_proba(self, alpha, market, model):
+        var = self.variance(market, model)
+        spot = self.next_mid.spot
+        p_down = (1/spot**2*(var+spot**2)-1-(alpha+1)*(1/spot*spot-1))/((1-alpha)*(1/alpha**2-1))
+        p_up = p_down/alpha
+        p_mid = 1-(p_down+p_up)
+        self.p_down = p_down
+        self.p_up = p_up
+        self.p_mid = p_mid
 
-def is_close(node, fwd_price):
+
+def is_close(node, fwd_price):  # Modifier les fonctions pour les mettre dans NODE
     up_price = node.spot*((1+tree.alpha)/2)
     down_price = node.spot*((1+1/tree.alpha)/2)
 
@@ -94,6 +104,7 @@ def create_first_nodes(root_node, market, model, tree_alpha, date):
 
     # Lier les noeuds up et down des noeuds crées
     link_up_down(root_node)
+    Node.calculate_proba(root_node, tree_alpha, market, model)
 
 
 def link_up_down(node):
@@ -137,6 +148,8 @@ def create_nodes(node, market, model, tree_alpha, date, direction='up'):
                 check_node = getattr(check_node, "node_" + direction)
                 check = 1
         node = current_node
+    #Calculer proba
+    Node.calculate_proba(node, tree_alpha, market, model)
 
 
 def create_next_nodes(root_node, market, model, tree_alpha, date):
