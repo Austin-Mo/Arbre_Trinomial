@@ -3,6 +3,10 @@
 from math import *
 from datetime import datetime, date, timedelta
 
+# Import et début start du temps d'exécution
+import time
+start_time = time.time()
+
 
 class Market:
     def __init__(self, volatility, risk_free_rate, spot, dividends):
@@ -96,13 +100,21 @@ class Node:
                               self.p_down * self.next_down.price(option))
         return self.pr_opt
 
+    def has_node_up(self):
+        return self.node_up is not None
 
-def is_close(node, fwd_price):  # Modifier les fonctions pour les mettre dans NODE
+    def has_node_down(self):
+        return self.node_down is not None
+
+
+def is_close(node, fwd_price):  # Modifier les fonctions pour les mettre dans NODE ?
     up_price = node.spot*((1+tree.alpha)/2)
     down_price = node.spot*((1+1/tree.alpha)/2)
 
     if up_price > fwd_price > down_price:
         return 1
+    elif fwd_price > up_price:
+        return 2
     else:
         return 0
 
@@ -130,43 +142,66 @@ def link_up_down(node):
     node.next_mid.node_down = node.next_down
 
 
+def associate_up_down(up_node, down_node):
+    up_node.node_down = down_node
+    down_node.node_up = up_node
+
+
 def create_nodes(node, market, model, tree_alpha, date, direction='up'):
     next_direction = "next_" + direction
     node_direction = "node_" + direction
-    opposite_direction = "down" if direction == "up" else "up"
 
     # Boucle pour parcourir tous les noeuds au dessus/dessous du noeud central
     while getattr(node, node_direction) is not None:
         current_node = getattr(node, node_direction)
         fwd_price = current_node.forward(market, model, date)
-
         check_node = getattr(node, next_direction)
         check = 0
         while check == 0:
             check = is_close(check_node, fwd_price)
-            if check == 1:
-                setattr(current_node, "next_mid", check_node)
-                setattr(current_node, next_direction, getattr(check_node, node_direction))
-                setattr(current_node, "next_"+opposite_direction, getattr(check_node, "node_"+opposite_direction))
+            match check:
+                case 1:  # Le noeud est close
+                    current_node.next_mid = check_node  # association du noeud checké comme next_mid du noeud
 
-                if getattr(check_node, node_direction) is None:
-                    if direction == "up":
-                        new_node = Node(check_node.spot * tree_alpha)
-                    else:
-                        new_node = Node(check_node.spot / tree_alpha)
-                    setattr(current_node, next_direction, new_node)
-                    setattr(new_node, "node_" + opposite_direction, check_node)
-                    setattr(check_node, "node_" + direction, new_node)
-                else:
-                    setattr(current_node, next_direction, getattr(check_node, next_direction))
-            else:
-                check_node = getattr(check_node, "node_" + direction)
-                check = 1
-        #Calculer proba
-        Node.calculate_proba(node, tree_alpha, market, model)
+                    # Check du noeud up
+                    if check_node.has_node_up():  # Le noeud close a un up, on l'associe
+                        current_node.next_up = check_node.node_up
+                    else:  # Le noeud close n'a pas de up, on le crée
+                        new_node = Node(check_node.spot * tree_alpha)  # Création d'un nouveau noeud
+                        current_node.next_up = new_node  # Associer le next_up au nouveau noeud
+                        associate_up_down(new_node, check_node)  # Associer les up/down des noeuds
+
+                    # Check du noeud down
+                    if check_node.has_node_down():  # Le noeud close a un down, on l'associe
+                        current_node.next_down = check_node.node_down
+                    else:  # Le noeud close n'a pas de down, on le crée
+                        new_node = Node(check_node.spot / tree_alpha)  # Création d'un nouveau noeud
+                        current_node.next_down = new_node  # Associer le next_down au nouveau noeud
+                        associate_up_down(check_node, new_node)
+
+                case 2:  # Le Fwd calculé est plus haut que la borne haute du noeud le plus haut
+                    # On crée un nouveau mid
+                    new_mid_node = Node(check_node.spot * tree_alpha)
+                    current_node.next_mid = new_mid_node
+                    associate_up_down(new_mid_node, check_node)
+                    # On crée un up au nouveau mid
+                    new_up_node = Node(new_mid_node.spot * tree_alpha)
+                    current_node.next_up = new_up_node  # Associer le next_up au nouveau noeud
+                    associate_up_down(new_up_node, new_mid_node)
+
+                case 0:
+                    if node.has_node_down():  # On regarde si l'on peut encore descendre, si oui on descend
+                        check_node = check_node.node_down  # on va vers le noeud du bas
+                    else:  # S'il n'y a plus de noeud down, on en créer un qui sera le mid
+                        new_mid_node = Node(check_node.spot / tree_alpha)  # Création d'un nouveau noeud
+                        current_node.next_mid = new_mid_node
+                        associate_up_down(new_mid_node, check_node)
+                        # Création du noeud down du nouveau mid
+                        new_down_node = Node(new_mid_node.spot / tree_alpha)  # Création du noeud du dessous
+                        current_node.next_down = new_down_node  # Associer le next_up au nouveau noeud
+                        associate_up_down(new_mid_node, new_down_node)
+        current_node.calculate_proba(tree_alpha, market, model)  # Calculer les probas du noeud sur lequel on travaille
         node = current_node
-    #Calculer proba
-    Node.calculate_proba(node, tree_alpha, market, model)
 
 
 def create_next_nodes(root_node, market, model, tree_alpha, date):
@@ -201,6 +236,7 @@ class Tree:
     def discount_factor(self):
         return exp(-self.market.rate*self.model.t_step)
 
+
 # main
 if __name__ == '__main__':
     # Ajout des paramètres
@@ -225,10 +261,12 @@ if __name__ == '__main__':
     # Appel de la fonction créer arbre
     tree.create_tree(root)
 
-    Node.display_all_nodes()  # test
+    #Node.display_all_nodes()
 
     print("\n")
     print("Le prix est:" + str(root.price(option)))
 
-
-
+    # Tester le temps d'exécution
+    end_time = time.time()
+    elapsed_time = end_time - start_time
+    print(f"Temps écoulé: {elapsed_time:.5f} secondes")
