@@ -37,7 +37,7 @@ class Model:
         self.option = option
         self.pr_date = datetime.strptime(pricing_date, "%d/%m/%Y").date()
         self.steps_nb = steps_number
-        self.t_step = ((option.maturity - self.pr_date) / self.steps_nb).total_seconds() / 86400 / 365  # En année
+        self.t_step = (option.maturity - self.pr_date).days / self.steps_nb / 365  # t_step en année
 
     def parametres(self):
         return self.pr_date, self.steps_nb, self.t_step
@@ -68,9 +68,9 @@ class Node:
     def __repr__(self):
         return str(self.spot)
 
-    def forward(self, market, model, date):
-        if date in market.div:
-            dividend = market.div[date]
+    def forward(self, market, model, step):
+        if step in market.div:
+            dividend = market.div[date]  # créer un dictionnaire avec des dates correspondant à une étape
             fwd_price = (self.spot - dividend) * exp(market.rate * model.t_step)
         else:
             fwd_price = self.spot * exp(market.rate * model.t_step)
@@ -119,9 +119,9 @@ def is_close(node, fwd_price):  # Modifier les fonctions pour les mettre dans NO
         return 0
 
 
-def create_first_nodes(root_node, market, model, tree_alpha, date):
+def create_first_nodes(root_node, market, model, tree_alpha, step):
     # Calculer le prix forward pour le noeud actuel.
-    fwd_price = root_node.forward(market, model, date)
+    fwd_price = root_node.forward(market, model, step)
 
     # Créer les trois noeuds suivants pour up, mid, et down.
     root_node.next_up = Node(fwd_price * tree_alpha)
@@ -147,14 +147,14 @@ def associate_up_down(up_node, down_node):
     down_node.node_up = up_node
 
 
-def create_nodes(node, market, model, tree_alpha, date, direction='up'):
+def create_nodes(node, market, model, tree_alpha, step, direction='up'):
     next_direction = "next_" + direction
     node_direction = "node_" + direction
 
     # Boucle pour parcourir tous les noeuds au dessus/dessous du noeud central
     while getattr(node, node_direction) is not None:
         current_node = getattr(node, node_direction)
-        fwd_price = current_node.forward(market, model, date)
+        fwd_price = current_node.forward(market, model, step)
         check_node = getattr(node, next_direction)
         check = 0
         while check == 0:
@@ -204,11 +204,11 @@ def create_nodes(node, market, model, tree_alpha, date, direction='up'):
         node = current_node
 
 
-def create_next_nodes(root_node, market, model, tree_alpha, date):
+def create_next_nodes(root_node, market, model, tree_alpha, step):
 
-    create_first_nodes(root_node, market, model, tree_alpha, date)  # création des 3 premiers noeuds
-    create_nodes(root_node, market, model, tree_alpha, date, direction='up')  # création des noeuds du dessus
-    create_nodes(root_node, market, model, tree_alpha, date, direction='down')  # création des noeuds du dessous
+    create_first_nodes(root_node, market, model, tree_alpha, step)  # création des 3 premiers noeuds
+    create_nodes(root_node, market, model, tree_alpha, step, direction='up')  # création des noeuds du dessus
+    create_nodes(root_node, market, model, tree_alpha, step, direction='down')  # création des noeuds du dessous
 
 
 class Tree:
@@ -223,15 +223,10 @@ class Tree:
         return alpha
 
     def create_tree(self, root):
-        # Boucle pour créer l'arbre en entier
-        i = 0
-        date = model.pr_date + timedelta(days=1)
-        while i < model.steps_nb:
+        for i in range(model.steps_nb):
             # Creation des noeuds suivants
-            create_next_nodes(root, market, model, tree.alpha, date)
+            create_next_nodes(root, market, model, tree.alpha, i)
             root = root.next_mid
-            i += 1
-            date = date + timedelta(days=1)
 
     def discount_factor(self):
         return exp(-self.market.rate*self.model.t_step)
@@ -240,31 +235,27 @@ class Tree:
 # main
 if __name__ == '__main__':
     # Ajout des paramètres
-    dividends = {date(2023, 9, 23): 2, date(2023, 9, 25): 3}
+    div = {date(2023, 9, 23): 0, date(2023, 9, 25): 0}
 
-    market = Market(0.25, 0.04, 100, dividends)
-    option = Option(102, "19/09/2024", "Call EU")
-    model = Model(option, "20/09/2023", 200)
+    market = Market(volatility=0.25, risk_free_rate=0.02, spot=100, dividends=div)
+    option = Option(strike=102, maturity_date="01/07/2024", option_type="Call EU")
+    model = Model(option, pricing_date="01/09/2023", steps_number=400)
     print('Market: ' + str(market.parametres()))
     print('Option: ' + str(option.parametres()))
     print('Model: ' + str(model.parametres()))
 
     # Creation de l'arbre
     tree = Tree(model, market, option)
-    print(f"Alpha: {tree.alpha} Times step: {tree.model.t_step}")
-
-    print("\n")
+    print(f"Alpha: {tree.alpha} Times step: {tree.model.t_step} \n")
 
     # Création du noeud initial
     root = Node(market.spot)
-
     # Appel de la fonction créer arbre
     tree.create_tree(root)
 
     #Node.display_all_nodes()
 
-    print("\n")
-    print("Le prix est:" + str(root.price(option)))
+    print("\nLe prix de l'option est: " + str(root.price(option)))
 
     # Tester le temps d'exécution
     end_time = time.time()
