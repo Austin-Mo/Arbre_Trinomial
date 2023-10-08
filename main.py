@@ -7,6 +7,10 @@ from datetime import datetime, date, timedelta
 import time
 start_time = time.time()
 
+# Changer la profondeur de la récursivité
+import sys
+sys.setrecursionlimit(2000)
+
 
 class Market:
     def __init__(self, volatility, risk_free_rate, spot, dividends):
@@ -20,16 +24,26 @@ class Market:
 
 
 class Option:
-    def __init__(self, strike, maturity_date, option_type):
+    def __init__(self, strike, maturity_date, option_type, option_style):
         self.K = strike
         self.maturity = datetime.strptime(maturity_date, "%d/%m/%Y").date()
-        self.type = option_type
+        if option_type not in ["Call", "Put"]:
+            raise ValueError(f"Invalid option type: {option_type}")
+        self.call_put = option_type
+        if option_style not in ["EU", "US"]:
+            raise ValueError(f"Invalid option style: {option_style}")
+        self.type = option_style
 
     def payoff(self, spot):
-        return max(spot-self.K, 0)
+        if self.call_put == "Call":
+            return max(spot - self.K, 0)
+        elif self.call_put == "Put":
+            return max(self.K - spot, 0)
+        else:
+            raise ValueError("Unknown option type")
 
     def parametres(self):
-        return self.K, self.maturity, self.type
+        return self.K, self.maturity, self.call_put, self.type
 
 
 class Model:
@@ -77,15 +91,16 @@ class Node:
         return fwd_price
 
     def variance(self, market, model):
-        var = self.spot**2*exp(2*market.rate*model.t_step)*(exp(market.vol**2*model.t_step)-1)
+        var = self.spot ** 2 * exp(2 * market.rate * model.t_step) * (exp(market.vol ** 2 * model.t_step) - 1)
         return var
 
     def calculate_proba(self, alpha, market, model):
         var = self.variance(market, model)
         spot = self.next_mid.spot
-        p_down = (1/spot**2*(var+spot**2)-1-(alpha+1)*(1/spot*spot-1))/((1-alpha)*(1/alpha**2-1))
-        p_up = p_down/alpha
-        p_mid = 1-(p_down+p_up)
+        p_down = (spot ** (-2) * (var + spot ** 2) - 1 - (alpha + 1) *
+                  (1 / spot * spot - 1)) / ((1 - alpha) * (alpha ** (-2) - 1))
+        p_up = (spot ** (-1) * spot - 1 - (alpha ** (-1) - 1) * p_down) / (alpha - 1)
+        p_mid = 1 - (p_down + p_up)
         self.p_down = p_down
         self.p_up = p_up
         self.p_mid = p_mid
@@ -96,8 +111,10 @@ class Node:
             self.pr_opt = option.payoff(self.spot)
         elif self.pr_opt is None:
             self.pr_opt = df * (self.p_up * self.next_up.price(option) +
-                              self.p_mid * self.next_mid.price(option) +
-                              self.p_down * self.next_down.price(option))
+                                self.p_mid * self.next_mid.price(option) +
+                                self.p_down * self.next_down.price(option))
+            if option.type == 'US':
+                self.pr_opt = max(self.pr_opt, option.payoff(self.spot))
         return self.pr_opt
 
     def has_node_up(self):
@@ -108,8 +125,8 @@ class Node:
 
 
 def is_close(node, fwd_price):  # Modifier les fonctions pour les mettre dans NODE ?
-    up_price = node.spot*((1+tree.alpha)/2)
-    down_price = node.spot*((1+1/tree.alpha)/2)
+    up_price = node.spot * ((1 + tree.alpha) / 2)
+    down_price = node.spot * ((1 + 1 / tree.alpha) / 2)
 
     if up_price > fwd_price > down_price:
         return 1
@@ -205,7 +222,6 @@ def create_nodes(node, market, model, tree_alpha, step, direction='up'):
 
 
 def create_next_nodes(root_node, market, model, tree_alpha, step):
-
     create_first_nodes(root_node, market, model, tree_alpha, step)  # création des 3 premiers noeuds
     create_nodes(root_node, market, model, tree_alpha, step, direction='up')  # création des noeuds du dessus
     create_nodes(root_node, market, model, tree_alpha, step, direction='down')  # création des noeuds du dessous
@@ -229,16 +245,16 @@ class Tree:
             root = root.next_mid
 
     def discount_factor(self):
-        return exp(-self.market.rate*self.model.t_step)
+        return exp(-self.market.rate * self.model.t_step)
 
 
 # main
 if __name__ == '__main__':
     # Ajout des paramètres
-    div = {date(2023, 9, 23): 0, date(2023, 9, 25): 0}
+    div = {date(2023, 9, 23): 2, date(2023, 9, 25): 3}
 
     market = Market(volatility=0.25, risk_free_rate=0.02, spot=100, dividends=div)
-    option = Option(strike=102, maturity_date="01/07/2024", option_type="Call EU")
+    option = Option(strike=102, maturity_date="01/07/2024", option_type="Call", option_style="EU")
     model = Model(option, pricing_date="01/09/2023", steps_number=400)
     print('Market: ' + str(market.parametres()))
     print('Option: ' + str(option.parametres()))
@@ -253,7 +269,7 @@ if __name__ == '__main__':
     # Appel de la fonction créer arbre
     tree.create_tree(root)
 
-    #Node.display_all_nodes()
+    # Node.display_all_nodes()
 
     print("\nLe prix de l'option est: " + str(root.price(option)))
 
