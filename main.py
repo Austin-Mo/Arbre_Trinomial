@@ -58,7 +58,7 @@ class Model:
 
 
 class Node:
-    def __init__(self, spot):
+    def __init__(self, spot, p_transition):
         self.spot = spot
         self.next_up = None
         self.next_mid = None
@@ -68,6 +68,7 @@ class Node:
         self.p_up = None
         self.p_mid = None
         self.p_down = None
+        self.p_transition = p_transition
         self.pr_opt = None
 
     def forward(self, market, model):        # t_step ?
@@ -86,17 +87,28 @@ class Node:
                   (spot **(-1) * esp - 1)) / ((1 - alpha) * (alpha ** (-2) - 1))
         self.p_up = (spot ** (-1) * esp - 1 - (alpha ** (-1) - 1) * self.p_down) / (alpha - 1)
         self.p_mid = 1 - (self.p_down + self.p_up)
+        self.set_total_probabilities()
+
+    def set_total_probabilities(self):
+        self.next_down.p_transition += self.p_transition * self.p_down
+        self.next_mid.p_transition += self.p_transition * self.p_mid
+        self.next_up.p_transition += self.p_transition * self.p_up
 
     def price(self, option):
         df = tree.discount_factor()
         if self.next_mid is None:
             self.pr_opt = option.payoff(self.spot)
         elif self.pr_opt is None:
-            self.pr_opt = df * (self.p_up * self.next_up.price(option) +
-                                self.p_mid * self.next_mid.price(option) +
-                                self.p_down * self.next_down.price(option))
-            if option.type == 'US':
-                self.pr_opt = max(self.pr_opt, option.payoff(self.spot))
+            if self.next_up is None:
+                self.pr_opt = df * self.next_mid.price(option)
+                if option.type == 'US':
+                    self.pr_opt = max(self.pr_opt, option.payoff(self.spot))
+            else:
+                self.pr_opt = df * (self.p_up * self.next_up.price(option) +
+                                    self.p_mid * self.next_mid.price(option) +
+                                    self.p_down * self.next_down.price(option))
+                if option.type == 'US':
+                    self.pr_opt = max(self.pr_opt, option.payoff(self.spot))
         return self.pr_opt
 
     @staticmethod
@@ -106,7 +118,7 @@ class Node:
 
 
 class NodeCreation:
-    def __init__(self, market, model):
+    def __init__(self, market, model, pruning):
         self.market = market
         self.model = model
         self.check_node = None
@@ -114,17 +126,13 @@ class NodeCreation:
         self.fwd_price = None
         self.div_steps = self.convert_dates_to_steps(market.div, model.pr_date, model.steps_nb)
         self.alpha = self.calculate_alpha()
-        self.code_dict = {
-            (1, "up"): lambda: self.up_and_close(),
-            (2, "up"): lambda: self.up_and_above(),
-            (0, "up"): lambda: self.up_and_bellow(),
-            (1, "down"): lambda: self.down_and_close(),
-            (2, "down"): lambda: self.down_and_above(),
-            (0, "down"): lambda: self.down_and_bellow(),
-        }
         self.steps_over_nodes = False
         self.node_direction = None
         self.next_direction = None
+        self.node_opposite_direction = None
+        self.next_opposite_direction = None
+        self.transition_node = None
+        self.p_transition = 0 if pruning == 'True' else 1
 
     def convert_dates_to_steps(self, dividend_dict, reference_date, steps_number):
         return {self.date_to_annual_time_measure(date, reference_date, steps_number): amount for date, amount in
@@ -150,25 +158,25 @@ class NodeCreation:
         div_bool = True if dividend == 0 else False
         self.create_first_nodes(root_node, dividend)  # création des 3 premiers noeuds
         if div_bool is True and self.steps_over_nodes is False:
-            self.create_nodes(root_node, direction='up')  # création des noeuds du dessus
-            self.create_nodes(root_node, direction='down')  # création des noeuds du dessous
+            self.create_nodes(root_node, 1)  # création des noeuds du dessus
+            self.create_nodes(root_node, -1)  # création des noeuds du dessous
         else:
             # si on a "sauté" des neuds au tour précédent (dans up_and_above ou down_and_bellow)
             # ou si on a des dividendes
             # alors il faut checker is_close
-            # on remet sel.step_over_nodes à sa valeur par défaut
+            # on remet self.step_over_nodes à sa valeur par défaut
             self.steps_over_nodes = False
-            self.create_nodes_and_check_is_close(root_node, dividend, direction='up')  # création des noeuds du dessus
-            self.create_nodes_and_check_is_close(root_node, dividend, direction='down')  # création des noeuds du dessous
+            self.create_nodes_and_check_is_close(root_node, dividend, 1)  # création des noeuds du dessus
+            self.create_nodes_and_check_is_close(root_node, dividend, -1)  # création des noeuds du dessous
 
     def create_first_nodes(self, root_node, dividend):
         # Calculer le prix forward pour le noeud actuel.
         self.fwd_price = root_node.forward(market, model) - dividend
 
         # Créer les trois noeuds suivants pour up, mid, et down.
-        root_node.next_up = Node(self.fwd_price * self.alpha)
-        root_node.next_mid = Node(self.fwd_price)
-        root_node.next_down = Node(self.fwd_price / self.alpha)
+        root_node.next_up = Node(self.fwd_price * self.alpha, self.p_transition)
+        root_node.next_mid = Node(self.fwd_price, self.p_transition)
+        root_node.next_down = Node(self.fwd_price / self.alpha, self.p_transition)
 
         # Lier les noeuds up et down des noeuds crées
         Node.associate_up_down(root_node.next_up, root_node.next_mid)
@@ -177,37 +185,69 @@ class NodeCreation:
 
     def get_direction(self, node, direction):
         self.current_node = node
-        self.next_direction = "next_" + direction
-        self.node_direction = "node_" + direction
+        match direction:
+            case 1:
+                self.next_direction = "next_up"
+                self.node_direction = "node_up"
+                self.next_opposite_direction = "next_down"
+                self.node_opposite_direction = "node_down"
+            case -1:
+                self.next_direction = "next_down"
+                self.node_direction = "node_down"
+                self.next_opposite_direction = "next_up"
+                self.node_opposite_direction = "node_up"
 
     def get_parameters(self, node_direction, next_direction, dividend):
         self.check_node = getattr(self.current_node, next_direction)
         self.current_node = getattr(self.current_node, node_direction)
         self.fwd_price = max(self.current_node.forward(market, model) - dividend, 0.01)
 
-    def create_nodes_and_check_is_close(self, node, dividend, direction='up'):
+    def create_nodes_and_check_is_close(self, node, dividend, direction):
         self.get_direction(node, direction)
         # Boucle pour parcourir tous les noeuds au dessus/dessous par rapport au noeud entré (noeud root)
         while getattr(self.current_node, self.node_direction) is not None:
             self.get_parameters(self.node_direction, self.next_direction, dividend)
-            check = self.is_close(self.check_node, self.fwd_price)
-            # Use the dictionary to execute the appropriate code block
-            key = (check, direction)
-            if key in self.code_dict:
-                self.code_dict[key]()  # Execute the corresponding code block
-            self.current_node.calculate_proba(self.alpha, market, model, dividend)  # Calculer les probas du noeud sur lequel on travaille
+            check = self.is_close(self.check_node, self.fwd_price) * direction - direction
 
-    def create_nodes(self, node, direction='up'):
+            if getattr(self.current_node, self.node_direction) is None and self.current_node.p_transition < 0.18**400:
+                self.all_in_next_mid(check, direction)
+            else:
+                # check compare le fwd et check_node mais aussi la direction (1, -1) pour qu'on sache dans quel cas on se trouve (cf. when_inside et when_outside)
+                match check:
+                    case 0:
+                        self.when_is_close(direction)
+                    case 1:
+                        self.when_outside(direction)
+                    case -1:
+                        self.when_inside(direction)
+                self.current_node.calculate_proba(self.alpha, market, model, dividend)  # Calculer les probas du noeud sur lequel on travaille
+
+    def all_in_next_mid(self, check, direction):
+        match check:
+            case 0:
+                self.current_node.next_mid = self.check_node
+            case 1:
+                new_node = Node(self.check_node.spot*self.alpha**direction, self.p_transition)
+                while self.is_close(new_node, self.fwd_price) - direction == 1:
+                    new_node = Node(new_node.spot*self.alpha**direction, self.p_transition)
+                self.current_node.next_mid = new_node
+                setattr(self.check_node, self.node_direction, new_node)
+                setattr(new_node, self.node_opposite_direction, self.check_node)
+            case -1:
+                self.current_node.next_mid = getattr(self.check_node, self.node_opposite_direction)
+
+    def create_nodes(self, node, direction):
         self.get_direction(node, direction)
         # Boucle pour parcourir tous les noeuds au dessus/dessous par rapport au noeud entré (noeud root)
         while getattr(self.current_node, self.node_direction) is not None:
             self.get_parameters(self.node_direction, self.next_direction, 0)
             # Use the dictionary to execute the appropriate code block
-            if direction == "up":
-                self.up_and_close()
+            if getattr(self.current_node, self.node_direction) is None and self.current_node.p_transition < 0.18**400:
+                self.current_node.next_mid = self.check_node
+
             else:
-                self.down_and_close()
-            self.current_node.calculate_proba(self.alpha, market, model, 0)
+                self.when_is_close(direction)
+                self.current_node.calculate_proba(self.alpha, market, model, 0)
 
     def is_close(self, node, fwd_price):  # Modifier les fonctions pour les mettre dans NODE ?
         up_price = node.spot * ((1 + self.alpha) / 2)
@@ -219,113 +259,62 @@ class NodeCreation:
         else:
             return 1
 
-    def up_and_close(self):
+    def when_is_close(self, direction):
         """
         is_close = True self.check_node est bien le next_mid de self.current_node
-        on crée le next_up de self.current_node
+        on crée le next_up/next_down de self.current_node
         on relie les next et le new_node avec le self.check_node
         """
-        new_node = Node(self.check_node.spot * self.alpha)  # Création d'un nouveau noeud
-        self.current_node.next_up = new_node  # Associer le next_up au nouveau noeud
+        new_node = Node(self.check_node.spot * self.alpha**direction, self.p_transition)
+        setattr(self.current_node, self.next_direction, new_node)
         self.current_node.next_mid = self.check_node
-        self.current_node.next_down = self.check_node.node_down
-        Node.associate_up_down(new_node, self.check_node)  # Associer les up/down des noeuds,
+        setattr(self.current_node, self.next_opposite_direction, getattr(self.check_node, self.node_opposite_direction))
+        setattr(self.check_node, self.node_direction, new_node)
+        setattr(new_node, self.node_opposite_direction, self.check_node)
 
-    def up_and_above(self):
+    def when_outside(self, direction):
         """
-         fwd > check_node
-         on modifie self.check_node en créant des neuds vers le haut jusqu'à ce que isclose = true puis on lance up_and_close() (cf. commentaires sur up_and_close)
-         Si self.check_node.node_down est au-dessus du next_up du neud en-dessous de self.current_node, il faut les relier
-         Alors on "saute" un neud, et il faut garder cela en mémoire pour le step + 1
+        on crée des neuds vers le haut mais fwd est tjs > check_node
+        ou bien on crée des neuds vers le bas mais fwd tjs < check_node
+        on crée un transition node et on voit si c'est suffisant
+        sinon on entre dans still_outside
         """
-        # on doit garder l'ancien check_node qui devient le next_down de check_node
-        new_down = self.check_node
-        # on crée un nouveau neud qui sera le next_mid de notre self.current_node
-        self.check_node = Node(self.check_node.spot * self.alpha)
-        # 2 possibilités : soit is_close est true et on n'entre pas dans la boucle if
-        # soit fwd est tjs au-dessus on entre dans la boucle if
-        if self.is_close(self.check_node, self.fwd_price) == 2:
-            # le next_up du node_down de current_node est en dessous du next_down de current node et il faut les relier
-            # créer nouvelle fonction ?
+        self.transition_node = self.check_node
+        self.check_node = Node(self.check_node.spot * self.alpha ** direction, self.p_transition)
+        if self.is_close(self.check_node, self.fwd_price) - direction == 1:
+            self.still_outside(direction)
 
-            current_node_node_down_next_up = new_down
-            while self.is_close(self.check_node, self.fwd_price) == 2:
-                # si on est là c'est qu'on a sauté un neud
-                self.steps_over_nodes = True
-                new_down = self.check_node
-                self.check_node = Node(self.check_node.spot*self.alpha)
-            # on lie le next_up du node_down de current_node et le next_down de current node
-            Node.associate_up_down(new_down, current_node_node_down_next_up)
-        # self.check_node et le next_mid de self.current_node ==> on lance up_and_close
-        Node.associate_up_down(self.check_node, new_down)
-        self.up_and_close()
+        setattr(self.check_node, self.node_opposite_direction, self.transition_node)
+        setattr(self.transition_node, self.node_direction, self.check_node)
+        self.when_is_close(direction)
 
-    def up_and_bellow(self):
-        """
-         fwd < check_node
-         les 3 nexts de current_node sont les mêmes que les trois nexts de current_node.node_down
-        """
-        current_node_node_down = self.current_node.node_down
-        self.current_node.next_down = current_node_node_down.next_down
-        self.current_node.next_mid = current_node_node_down.next_mid
-        self.current_node.next_up = current_node_node_down.next_up
+    def still_outside(self, direction):
+        memory_node = self.transition_node
+        while self.is_close(self.check_node, self.fwd_price) - direction == 1:
+            self.steps_over_nodes = True
+            self.transition_node = self.check_node
+            self.check_node = Node(self.check_node.spot * self.alpha ** direction, self.p_transition)
+        setattr(self.transition_node, self.node_opposite_direction, memory_node)
+        setattr(memory_node, self.node_direction, self.transition_node)
 
-    def down_and_close(self):
+    def when_inside(self):
         """
-        is_close = True self.check_node est bien le next_mid de self.current_node
-        on crée le next_down de self.current_node
-        on relie les neuds à relier (nexts et down)
+         on crée vers le haut mais fwd < check_node ou vers le bas mais fwd > check_node
+         les 3 nexts de current_node sont les mêmes que les trois nexts de current_node.node_down (cas vers le haut) ou current_node.node_up (cas vers le bas)
         """
-        new_node = Node(self.check_node.spot / self.alpha)  # Création d'un nouveau noeud
-        self.current_node.next_down = new_node  # Associer le next_up au nouveau noeud
-        self.current_node.next_mid = self.check_node
-        self.current_node.next_up = self.check_node.node_up
-        Node.associate_up_down(self.check_node, new_node)  # Associer les up/down des noeuds,
-
-    def down_and_bellow(self):
-        """
-         fwd < check_node
-         on modifie self.check_node en créant des neuds vers le bas jusqu'à ce que isclose = true puis on lance down_and_close()
-         Si self.check_node.node_up est e-dessous du next_down du neud au-dessus de self.current_node, il faut les relier
-         Alors on "saute" un neud, et il faut garder cela en mémoire pour le step + 1
-        """
-        # on doit garder l'ancien check_node qui devient le next_down de check_node
-        new_up = self.check_node
-        # on crée un nouveau neud qui sera le next_mid de notre self.current_node
-        self.check_node = Node(self.check_node.spot / self.alpha)
-        # 2 possibilités : soit is_close est true et on n'entre pas dans la boucle if
-        # soit fwd est tjs au-dessus on entre dans la boucle if
-        if self.is_close(self.check_node, self.fwd_price) == 0:
-            # le next_up du node_down de current_node est en dessous du next_down de current node et il faut les relier
-            current_node_node_up_next_down = new_up
-            while self.is_close(self.check_node, self.fwd_price) == 0:
-                # si on est là c'est qu'on a sauté un neud
-                self.steps_over_nodes = True
-                new_up = self.check_node
-                self.check_node = Node(self.check_node.spot/self.alpha)
-            # on lie le next_up du node_down de current_node et le next_down de current node
-            Node.associate_up_down(current_node_node_up_next_down, new_up)
-        # self.check_node et le next_mid de self.current_node ==> on lance up_and_close
-        Node.associate_up_down(new_up, self.check_node)
-        self.down_and_close()
-
-    def down_and_above(self):
-        """
-         fwd > check_node
-         les 3 nexts de current_node sont les mêmes que les trois nexts de current_node.node_up
-        """
-        current_node_node_up = self.current_node.node_up
-        self.current_node.next_down = current_node_node_up.next_down
-        self.current_node.next_mid = current_node_node_up.next_mid
-        self.current_node.next_up = current_node_node_up.next_up
+        current_node_node_opposite_direction = getattr(self.current_node, self.node_opposite_direction)
+        self.current_node.next_down = current_node_node_opposite_direction.next_down
+        self.current_node.next_mid = current_node_node_opposite_direction.next_mid
+        self.current_node.next_up = current_node_node_opposite_direction.next_up
 
 
 class Tree:
-    def __init__(self, model, market, option):
+    def __init__(self, model, market, option, pruning):
         self.model = model
         self.market = market
         self.option = option
-        self.NodeCreation = NodeCreation(self.market, self.model)
+        self.pruning = pruning
+        self.NodeCreation = NodeCreation(self.market, self.model, self.pruning)
 
     def create_tree(self, root):
         for i in range(model.steps_nb):
@@ -343,18 +332,18 @@ if __name__ == '__main__':
     option = Option(strike=108.88, maturity_date="07/12/2022", option_type="Call", option_style="EU")
     model = Model(option, pricing_date="18/02/2022", steps_number=75)
     div = {date(2022, 4, 2): 1.66}
-
+    pruning = "True"
     market = Market(volatility=0.1077, risk_free_rate=0.0971, spot=163.73, dividends=div)
 
     print('Market: ' + str(market.parametres()))
     print('Option: ' + str(option.parametres()))
     print('Model: ' + str(model.parametres()))
     # Creation de l'arbre
-    tree = Tree(model, market, option)
+    tree = Tree(model, market, option, pruning)
 #    print(f"Alpha: {tree.alpha} Times step: {tree.model.t_step} \n")
 
     # Création du noeud initial
-    root = Node(market.spot)
+    root = Node(market.spot,1)
     # Appel de la fonction créer arbre
     tree.create_tree(root)
 
