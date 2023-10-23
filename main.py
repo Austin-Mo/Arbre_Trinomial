@@ -1,16 +1,18 @@
 # Creation Arbre
-
-
 from math import *
 from datetime import datetime, date
+import xlwings as xw
 
 # Import et début start du temps d'exécution
 import time
+
 start_time = time.time()
 
 # Changer la profondeur de la récursivité
 import sys
+
 sys.setrecursionlimit(100000)
+
 
 class Market:
     def __init__(self, volatility, risk_free_rate, spot, dividends):
@@ -71,7 +73,7 @@ class Node:
         self.p_transition = p_transition
         self.pr_opt = None
 
-    def forward(self, market, model):        # t_step ?
+    def forward(self, market, model):  # t_step ?
         fwd_price = self.spot * exp(market.rate * model.t_step)
         return fwd_price
 
@@ -84,10 +86,12 @@ class Node:
         spot = self.next_mid.spot
         esp = Node.forward(self, market, model) - dividend
         self.p_down = (spot ** (-2) * (var + esp ** 2) - 1 - (alpha + 1) *
-                  (spot **(-1) * esp - 1)) / ((1 - alpha) * (alpha ** (-2) - 1))
+                       (spot ** (-1) * esp - 1)) / ((1 - alpha) * (alpha ** (-2) - 1))
         self.p_up = (spot ** (-1) * esp - 1 - (alpha ** (-1) - 1) * self.p_down) / (alpha - 1)
         self.p_mid = 1 - (self.p_down + self.p_up)
         self.set_total_probabilities()
+        if self.p_down < 0 or self.p_mid < 0 or self.p_up < 0:
+            raise ValueError("Error, negative probability with node " + str(self) + " !")
 
     def set_total_probabilities(self):
         self.next_down.p_transition += self.p_transition * self.p_down
@@ -209,7 +213,7 @@ class NodeCreation:
             self.get_parameters(self.node_direction, self.next_direction, dividend)
             check = self.is_close(self.check_node, self.fwd_price) * direction - direction
 
-            if getattr(self.current_node, self.node_direction) is None and self.current_node.p_transition < 0.18**400:
+            if getattr(self.current_node, self.node_direction) is None and self.current_node.p_transition < 0.18 ** 400:
                 self.all_in_next_mid(check, direction)
             else:
                 # check compare le fwd et check_node mais aussi la direction (1, -1) pour qu'on sache dans quel cas on se trouve (cf. when_inside et when_outside)
@@ -220,16 +224,17 @@ class NodeCreation:
                         self.when_outside(direction)
                     case -1:
                         self.when_inside(direction)
-                self.current_node.calculate_proba(self.alpha, market, model, dividend)  # Calculer les probas du noeud sur lequel on travaille
+                self.current_node.calculate_proba(self.alpha, market, model,
+                                                  dividend)  # Calculer les probas du noeud sur lequel on travaille
 
     def all_in_next_mid(self, check, direction):
         match check:
             case 0:
                 self.current_node.next_mid = self.check_node
             case 1:
-                new_node = Node(self.check_node.spot*self.alpha**direction, self.p_transition)
+                new_node = Node(self.check_node.spot * self.alpha ** direction, self.p_transition)
                 while self.is_close(new_node, self.fwd_price) - direction == 1:
-                    new_node = Node(new_node.spot*self.alpha**direction, self.p_transition)
+                    new_node = Node(new_node.spot * self.alpha ** direction, self.p_transition)
                 self.current_node.next_mid = new_node
                 setattr(self.check_node, self.node_direction, new_node)
                 setattr(new_node, self.node_opposite_direction, self.check_node)
@@ -242,7 +247,7 @@ class NodeCreation:
         while getattr(self.current_node, self.node_direction) is not None:
             self.get_parameters(self.node_direction, self.next_direction, 0)
             # Use the dictionary to execute the appropriate code block
-            if getattr(self.current_node, self.node_direction) is None and self.current_node.p_transition < 0.18**400:
+            if getattr(self.current_node, self.node_direction) is None and self.current_node.p_transition < 0.18 ** 400:
                 self.current_node.next_mid = self.check_node
 
             else:
@@ -265,7 +270,7 @@ class NodeCreation:
         on crée le next_up/next_down de self.current_node
         on relie les next et le new_node avec le self.check_node
         """
-        new_node = Node(self.check_node.spot * self.alpha**direction, self.p_transition)
+        new_node = Node(self.check_node.spot * self.alpha ** direction, self.p_transition)
         setattr(self.current_node, self.next_direction, new_node)
         self.current_node.next_mid = self.check_node
         setattr(self.current_node, self.next_opposite_direction, getattr(self.check_node, self.node_opposite_direction))
@@ -326,11 +331,46 @@ class Tree:
         return exp(-self.market.rate * self.model.t_step)
 
 
+def tree_to_matrix(root, steps_nb):
+    # Initialize the matrix with None
+    matrix = [[None for _ in range(steps_nb + 1)] for _ in range(2*steps_nb + 1)]
+
+    # Set the root in the middle of the first column
+    mid_row = steps_nb
+    col = 0
+
+    while root is not None:
+        mid_row = steps_nb
+        matrix[mid_row][col] = root.spot
+        node = root
+        mid_row = steps_nb
+        while node.node_up is not None:
+            mid_row -= 1
+            node = node.node_up
+            matrix[mid_row][col] = node.spot
+        node = root
+        mid_row = steps_nb
+        while node.node_down is not None:
+            mid_row += 1
+            node = node.node_down
+            matrix[mid_row][col] = node.spot
+        col += 1
+        root = root.next_mid
+
+    return matrix
+
+
+def write_to_excel(matrix):
+    wb = xw.Book()
+    ws = wb.sheets[0]
+    ws.range('A1').value = matrix
+
+
 # main
 if __name__ == '__main__':
     # Ajout des paramètres
     option = Option(strike=108.88, maturity_date="07/12/2022", option_type="Call", option_style="EU")
-    model = Model(option, pricing_date="18/02/2022", steps_number=75)
+    model = Model(option, pricing_date="18/02/2022", steps_number=200)
     div = {date(2022, 4, 2): 1.66}
     pruning = "True"
     market = Market(volatility=0.1077, risk_free_rate=0.0971, spot=163.73, dividends=div)
@@ -340,16 +380,20 @@ if __name__ == '__main__':
     print('Model: ' + str(model.parametres()))
     # Creation de l'arbre
     tree = Tree(model, market, option, pruning)
-#    print(f"Alpha: {tree.alpha} Times step: {tree.model.t_step} \n")
+    #    print(f"Alpha: {tree.alpha} Times step: {tree.model.t_step} \n")
 
     # Création du noeud initial
-    root = Node(market.spot,1)
+    root = Node(market.spot, 1)
     # Appel de la fonction créer arbre
     tree.create_tree(root)
 
-    #Node.display_all_nodes()
+    # Node.display_all_nodes()
 
     print("\nLe prix de l'option est: " + str(root.price(option)))
+
+    # Convertir l'arbre en matrice et écrire cette matrice dans Excel
+    matrix_representation = tree_to_matrix(root, model.steps_nb)
+    write_to_excel(matrix_representation)
 
     # Tester le temps d'exécution
     end_time = time.time()
