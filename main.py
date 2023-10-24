@@ -1,6 +1,7 @@
 # Creation Arbre
 from math import *
 from datetime import datetime, date
+import numpy as np
 import xlwings as xw
 
 # Import et début start du temps d'exécution
@@ -254,7 +255,7 @@ class NodeCreation:
                 self.when_is_close(direction)
                 self.current_node.calculate_proba(self.alpha, market, model, 0)
 
-    def is_close(self, node, fwd_price):  # Modifier les fonctions pour les mettre dans NODE ?
+    def is_close(self, node, fwd_price):
         up_price = node.spot * ((1 + self.alpha) / 2)
         down_price = node.spot * ((1 + 1 / self.alpha) / 2)
         if fwd_price < down_price:
@@ -331,29 +332,48 @@ class Tree:
         return exp(-self.market.rate * self.model.t_step)
 
 
-def tree_to_matrix(root, steps_nb):
-    # Initialize the matrix with None
-    matrix = [[None for _ in range(steps_nb + 1)] for _ in range(2*steps_nb + 1)]
+def count_node(root_node, direction):
+    count = 0
+    attr_name = "node_" + direction
+    while getattr(root_node, attr_name) is not None:
+        count += 1
+        root_node = getattr(root_node, attr_name)
+    return count
 
-    # Set the root in the middle of the first column
-    mid_row = steps_nb
+
+def fill_up_down(matrix, root_node, mid_row, col, direction):
+    attr_name = "node_" + direction
+    if direction == "up":
+        move = -1
+    else:
+        move = 1
+    row = mid_row
+    while getattr(root_node, attr_name) is not None:
+            row += move
+            root_node = getattr(root_node, attr_name)
+            matrix[row][col] = root_node.spot
+    return matrix
+
+
+def tree_to_matrix(root, steps_nb):
+    center_node = root
+    while center_node.next_mid is not None:
+        center_node = center_node.next_mid  # Récupérer le dernier noeud du centre
+    count_up = count_node(center_node, direction="up")
+    count_down = count_node(center_node, direction="down")
+
+    # Initialiser la matrice
+    matrix = np.empty((count_up + count_down + 1, steps_nb + 1))
+    matrix.fill(None)
+
+    # Placer le premier noeud dans la première colonne
+    mid_row = count_up
     col = 0
 
     while root is not None:
-        mid_row = steps_nb
         matrix[mid_row][col] = root.spot
-        node = root
-        mid_row = steps_nb
-        while node.node_up is not None:
-            mid_row -= 1
-            node = node.node_up
-            matrix[mid_row][col] = node.spot
-        node = root
-        mid_row = steps_nb
-        while node.node_down is not None:
-            mid_row += 1
-            node = node.node_down
-            matrix[mid_row][col] = node.spot
+        matrix = fill_up_down(matrix, root, mid_row, col, direction="up")
+        matrix = fill_up_down(matrix, root, mid_row, col, direction="down")
         col += 1
         root = root.next_mid
 
@@ -370,7 +390,7 @@ def write_to_excel(matrix):
 if __name__ == '__main__':
     # Ajout des paramètres
     option = Option(strike=108.88, maturity_date="07/12/2022", option_type="Call", option_style="EU")
-    model = Model(option, pricing_date="18/02/2022", steps_number=200)
+    model = Model(option, pricing_date="18/02/2022", steps_number=2000)
     div = {date(2022, 4, 2): 1.66}
     pruning = "True"
     market = Market(volatility=0.1077, risk_free_rate=0.0971, spot=163.73, dividends=div)
