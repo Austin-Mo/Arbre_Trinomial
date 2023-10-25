@@ -33,7 +33,7 @@ class Node:
         self.p_mid = 1 - (self.p_down + self.p_up)
         self.set_total_probabilities()
         if self.p_down < 0 or self.p_mid < 0 or self.p_up < 0:
-            raise ValueError("Error, negative probability with node " + str(self) + " !")
+            raise ValueError(f"Error, negative probability with node {self} !")
 
     def set_total_probabilities(self):
         self.next_down.p_transition += self.p_transition * self.p_down

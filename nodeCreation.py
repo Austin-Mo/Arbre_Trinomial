@@ -41,12 +41,12 @@ class NodeCreation:
     def create_next_nodes(self, root_node, step):
         dividend = self.compute_div(step)
         div_bool = True if dividend == 0 else False
-        self.create_first_nodes(root_node, dividend)  # création des 3 premiers noeuds
+        self.create_first_nodes(root_node, dividend)  # création des 3 premiers nœuds
         if div_bool is True and self.steps_over_nodes is False:
-            self.create_nodes(root_node, 1)  # création des noeuds du dessus
-            self.create_nodes(root_node, -1)  # création des noeuds du dessous
+            self.create_nodes(root_node, 1)  # création des nœuds du dessus
+            self.create_nodes(root_node, -1)  # création des nœuds du dessous
         else:
-            # si on a "sauté" des neuds au tour précédent (dans up_and_above ou down_and_bellow)
+            # si on a "sauté" des nœuds au tour précédent (dans up_and_above ou down_and_bellow)
             # ou si on a des dividendes
             # alors il faut checker is_close
             # on remet self.step_over_nodes à sa valeur par défaut
@@ -85,16 +85,18 @@ class NodeCreation:
     def get_parameters(self, node_direction, next_direction, dividend):
         self.check_node = getattr(self.current_node, next_direction)
         self.current_node = getattr(self.current_node, node_direction)
-        self.fwd_price = max(self.current_node.forward(self.market, self.model) - dividend, 0.01)
+        self.fwd_price = self.current_node.forward(self.market, self.model) - dividend
+        if self.fwd_price < 0:
+            raise ValueError(f"Error, negative forward {self} !")
 
     def create_nodes_and_check_is_close(self, node, dividend, direction):
         self.get_direction(node, direction)
-        # Boucle pour parcourir tous les noeuds au dessus/dessous par rapport au noeud entré (noeud root)
+        # Boucle pour parcourir tous les nœuds au-dessus/dessous par rapport au nœud entré (nœud root)
         while getattr(self.current_node, self.node_direction) is not None:
             self.get_parameters(self.node_direction, self.next_direction, dividend)
             check = self.is_close(self.check_node, self.fwd_price) * direction - direction
 
-            if getattr(self.current_node, self.node_direction) is None and self.current_node.p_transition < 0.18 ** 400:
+            if getattr(self.current_node, self.node_direction) is None and self.current_node.p_transition < 1e-6:
                 self.all_in_next_mid(check, direction)
             else:
                 # check compare le fwd et check_node mais aussi la direction (1, -1) pour qu'on sache dans quel cas on se trouve (cf. when_inside et when_outside)
@@ -106,7 +108,7 @@ class NodeCreation:
                     case -1:
                         self.when_inside(direction)
                 self.current_node.calculate_proba(self.alpha, self.market, self.model,
-                                                  dividend)  # Calculer les probas du noeud sur lequel on travaille
+                                                  dividend)  # Calculer les probas du nœud sur lequel on travaille
 
     def all_in_next_mid(self, check, direction):
         match check:
@@ -128,7 +130,7 @@ class NodeCreation:
         while getattr(self.current_node, self.node_direction) is not None:
             self.get_parameters(self.node_direction, self.next_direction, 0)
             # Use the dictionary to execute the appropriate code block
-            if getattr(self.current_node, self.node_direction) is None and self.current_node.p_transition < 0.18 ** 400:
+            if getattr(self.current_node, self.node_direction) is None and self.current_node.p_transition < 1e-6:
                 self.current_node.next_mid = self.check_node
 
             else:
@@ -160,7 +162,7 @@ class NodeCreation:
 
     def when_outside(self, direction):
         """
-        on crée des neuds vers le haut mais fwd est tjs > check_node
+        on crée des noeuds vers le haut mais fwd est tjs > check_node
         ou bien on crée des neuds vers le bas mais fwd tjs < check_node
         on crée un transition node et on voit si c'est suffisant
         sinon on entre dans still_outside
