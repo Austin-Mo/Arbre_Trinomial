@@ -4,7 +4,7 @@ from datetime import datetime
 class Model:
     def __init__(self, option_maturity, pricing_date, steps_number):
         self.maturity = option_maturity
-        self.pr_date = datetime.strptime(pricing_date, "%d/%m/%Y").date()
+        self.pr_date = pricing_date.date()
         self.steps_nb = steps_number
         self.t_step = self.calculate_t_step()
 

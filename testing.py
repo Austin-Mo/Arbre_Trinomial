@@ -12,6 +12,7 @@ from datetime import date
 import time
 import sys
 
+
 def black_scholes(S, K, T, r, sigma, option_type):
     """
     S: Current stock price
@@ -44,7 +45,7 @@ def function_of_k(print_fct_k, option, pruning, model, market):
         tree_prices = []
         diffs = []
 
-        for K in range(1, round(market.spot*2)):
+        for K in tqdm(range(round(market.spot/2), round(market.spot*1.8))):
             option.K = K
             # Initialisation de l'arbre et du premier nœud
             tree = Tree(model, market, option, pruning)
@@ -99,7 +100,7 @@ def function_of_step(print_fct_step, option, pruning, model, market):
         tree_prices = []
         diffs = []
 
-        for steps_nb in tqdm(range(1, 1000)):
+        for steps_nb in tqdm(range(1, 500)):
             model.steps_nb = steps_nb
             model.t_step = model.calculate_t_step()
 

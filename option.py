@@ -4,7 +4,7 @@ from datetime import datetime
 class Option:
     def __init__(self, strike, maturity_date, option_type, option_style):
         self.K = strike
-        self.maturity = datetime.strptime(maturity_date, "%d/%m/%Y").date()
+        self.maturity = maturity_date.date()
         if option_type not in ["Call", "Put"]:
             raise ValueError(f"Invalid option type: {option_type}")
         self.call_put = option_type

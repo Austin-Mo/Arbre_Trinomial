@@ -50,9 +50,10 @@ def tree_to_matrix(root, steps_nb):
     return matrix
 
 
-def write_to_excel(print_tree, root, stp_nb):
+def write_to_excel(print_tree, root, stp_nb, workbook):
     if print_tree:
-        wb = xw.Book()
-        ws = wb.sheets[0]
+        ws = workbook.sheets["Python_Tree"]
+        # Nettoyer la feuille
+        ws.clear_contents()
         # Convertir l'arbre en matrice et écrire cette matrice dans Excel
         ws.range('A1').value = tree_to_matrix(root, stp_nb)
