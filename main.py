@@ -22,10 +22,10 @@ wb = xw.Book(excel_file_path)  # L'Excel doit déjà être ouvert
 sheet = wb.sheets['Pricer']
 
 
-def main_function():
+def get_data():
     # Récupération des paramètres depuis Excel
     param_list = ['vol', 'rate', 'spot', 'div', 'div_date', 'strike', 'maturity', 'type',
-                  'style', 'pr_date', 'steps_nb', 'pruning', 'print_tree', 'print_k', 'print_step']
+                  'style', 'pr_date', 'steps_nb', 'pruning', 'print_tree', 'print_k', 'print_step', 'threshold']
     params = {}
     for prm in param_list:
         params[prm] = sheet.range(prm).value
@@ -48,10 +48,37 @@ def main_function():
                     spot=params['spot'],
                     dividends=div_dict)
 
-    pruning = params['pruning']
-    print_tree = params['print_tree']
-    print_fct_k = params['print_k']
-    print_fct_step = params['print_step']
+    tree = Tree(model=model,
+                market=market,
+                option=option,
+                pruning=params['pruning'],
+                threshold=params['threshold'])
+
+    # Création du dictionnaire de données
+    data = {
+        "option": option,
+        "model": model,
+        "market": market,
+        "tree": tree,
+        "pruning": params['pruning'],
+        "threshold": params['threshold'],
+        "print_tree": params['print_tree'],
+        "print_fct_k": params['print_k'],
+        "print_fct_step": params['print_step']
+    }
+
+    return data
+
+
+@xw.sub
+def main_function():
+    # Récupération des datas
+    data = get_data()
+    option = data['option']
+    model = data['model']
+    market = data['market']
+    tree = data['tree']
+    print_tree = data['print_tree']
 
     # Affichage des paramètres entrés
     market.param()
@@ -61,10 +88,8 @@ def main_function():
     # Start du timer
     start_time = time.time()
 
-    # Initialisation de l'arbre et du premier nœud
-    tree = Tree(model, market, option, pruning)
+    # Initialisation du premier nœud et construction de l'arbre
     root = Node(market.spot, 1)
-    # Construction de l'arbre
     tree.create_tree(root)
 
     pr_tree = root.price(option, tree)
@@ -85,9 +110,23 @@ def main_function():
     # Conversion de l'arbre en matrice et écriture de cette matrice dans Excel
     write_to_excel(print_tree, root, model.steps_nb, wb)
 
-    function_of_k(print_fct_k, option, tree, model, market)
-    function_of_step(print_fct_step, option, pruning, model, market)
+
+@xw.sub
+def graphs():
+    data = get_data()
+    market = data['market']
+    option = data['option']
+    model = data['model']
+    pruning = data['pruning']
+    threshold = data['threshold']
+    print_fct_k = data['print_fct_k']
+    print_fct_step = data['print_fct_step']
+
+    # Graphiques
+    function_of_k(print_fct_k, option, pruning, threshold, model, market)
+    function_of_step(print_fct_step, option, pruning, threshold, model, market)
 
 
 if __name__ == '__main__':
     main_function()
+    graphs()

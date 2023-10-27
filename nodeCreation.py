@@ -3,7 +3,7 @@ from math import *
 
 
 class NodeCreation:
-    def __init__(self, market, model, pruning):
+    def __init__(self, market, model, pruning, threshold):
         self.market = market
         self.model = model
         self.check_node = None
@@ -18,6 +18,7 @@ class NodeCreation:
         self.next_opposite_direction = None
         self.transition_node = None
         self.p_transition = 0 if pruning else 1
+        self.threshold = threshold
 
     def convert_dates_to_steps(self, dividend_dict, reference_date):
         return {self.date_to_annual_time_measure(date, reference_date): amount for date, amount in
@@ -96,7 +97,7 @@ class NodeCreation:
             self.get_parameters(self.node_direction, self.next_direction, dividend)
             check = self.is_close(self.check_node, self.fwd_price) * direction - direction
 
-            if getattr(self.current_node, self.node_direction) is None and self.current_node.p_transition < 1e-6:
+            if getattr(self.current_node, self.node_direction) is None and self.current_node.p_transition < self.threshold:
                 self.all_in_next_mid(check, direction)
             else:
                 # check compare le fwd et check_node mais aussi la direction (1, -1) pour qu'on sache dans quel cas on se trouve (cf. when_inside et when_outside)
@@ -130,7 +131,7 @@ class NodeCreation:
         while getattr(self.current_node, self.node_direction) is not None:
             self.get_parameters(self.node_direction, self.next_direction, 0)
             # Use the dictionary to execute the appropriate code block
-            if getattr(self.current_node, self.node_direction) is None and self.current_node.p_transition < 1e-6:
+            if getattr(self.current_node, self.node_direction) is None and self.current_node.p_transition < self.threshold:
                 self.current_node.next_mid = self.check_node
 
             else:

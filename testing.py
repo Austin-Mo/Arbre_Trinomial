@@ -36,8 +36,9 @@ def black_scholes(S, K, T, r, sigma, option_type):
     return option_price
 
 
-def function_of_k(print_fct_k, option, pruning, model, market):
+def function_of_k(print_fct_k, option, pruning, threshold, model, market):
     if print_fct_k:
+        entered_k = option.K
         market.div = {}
         # Création de listes pour stocker les valeurs
         k_values = []
@@ -48,7 +49,7 @@ def function_of_k(print_fct_k, option, pruning, model, market):
         for K in tqdm(range(round(market.spot/2), round(market.spot*1.8))):
             option.K = K
             # Initialisation de l'arbre et du premier nœud
-            tree = Tree(model, market, option, pruning)
+            tree = Tree(model, market, option, pruning, threshold)
             root = Node(market.spot, 1)
             # Construction de l'arbre
             tree.create_tree(root)
@@ -90,9 +91,12 @@ def function_of_k(print_fct_k, option, pruning, model, market):
         plt.tight_layout()
         plt.show()
 
+        option.K = entered_k  # remettre le k de base
 
-def function_of_step(print_fct_step, option, pruning, model, market):
+
+def function_of_step(print_fct_step, option, pruning, threshold, model, market):
     if print_fct_step:
+        entered_step = model.steps_nb
         market.div = {}
         # Création de listes pour stocker les valeurs
         step_values = []
@@ -105,7 +109,7 @@ def function_of_step(print_fct_step, option, pruning, model, market):
             model.t_step = model.calculate_t_step()
 
             # Initialisation de l'arbre et du premier nœud
-            tree = Tree(model, market, option, pruning)
+            tree = Tree(model, market, option, pruning, threshold)
             root = Node(market.spot, 1)
             # Construction de l'arbre
             tree.create_tree(root)
@@ -131,3 +135,6 @@ def function_of_step(print_fct_step, option, pruning, model, market):
 
         plt.tight_layout()
         plt.show()
+
+        model.steps_nb = entered_step
+
