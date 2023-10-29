@@ -1,9 +1,12 @@
+from market import Market
+from model import Model
 from node import Node
 from math import *
+from datetime import date
 
 
 class NodeCreation:
-    def __init__(self, market, model, pruning, threshold):
+    def __init__(self, market: Market, model: Model, pruning: bool, threshold: float) -> None:
         self.market = market
         self.model = model
         self.check_node = None
@@ -20,26 +23,31 @@ class NodeCreation:
         self.p_transition = 0 if pruning else 1
         self.threshold = threshold
 
-    def convert_dates_to_steps(self, dividend_dict, reference_date):
+    # Conversion des dates des dividendes en étapes
+    def convert_dates_to_steps(self, dividend_dict: dict[date, float], reference_date: object) -> dict[float, float]:
         return {self.date_to_annual_time_measure(date, reference_date): amount for date, amount in
                 dividend_dict.items()}
 
+    # Conversion des dates en année
     @staticmethod
-    def date_to_annual_time_measure(dividend_date, reference_date):
+    def date_to_annual_time_measure(dividend_date: date, reference_date: date) -> float:
         return (dividend_date - reference_date).days / 365
 
-    def calculate_alpha(self):
+    # Formule du alpha
+    def calculate_alpha(self) -> float:
         alpha = exp(self.market.vol * sqrt(3 * self.model.t_step))
         return alpha
 
-    def compute_div(self, step):
+    # Retourne un dividende si l'étape correspond à une étape avec dividende
+    def compute_div(self, step: int) -> float:
         dividend = 0
         for key_step in self.div_steps.keys():
             if (step + 1) * self.model.t_step >= key_step > step * self.model.t_step:
-                dividend += self.div_steps[key_step]  # créer un dictionnaire avec des dates correspondant à une étape
+                dividend += self.div_steps[key_step]
         return dividend
 
-    def create_next_nodes(self, root_node, step):
+    # Création des nœuds
+    def create_next_nodes(self, root_node: Node, step: int) -> None:
         dividend = self.compute_div(step)
         div_bool = True if dividend == 0 else False
         self.create_first_nodes(root_node, dividend)  # création des 3 premiers nœuds
@@ -55,8 +63,8 @@ class NodeCreation:
             self.create_nodes_and_check_is_close(root_node, dividend, 1)  # création des noeuds du dessus
             self.create_nodes_and_check_is_close(root_node, dividend, -1)  # création des noeuds du dessous
 
-    def create_first_nodes(self, root_node, dividend):
-        # Calculer le prix forward pour le noeud actuel.
+    # Calculer le prix forward pour le noeud actuel
+    def create_first_nodes(self, root_node: Node, dividend: float) -> None:
         self.fwd_price = root_node.forward(self.market, self.model) - dividend
 
         # Créer les trois noeuds suivants pour up, mid, et down.
@@ -69,7 +77,8 @@ class NodeCreation:
         Node.associate_up_down(root_node.next_mid, root_node.next_down)
         Node.calculate_proba(root_node, self.alpha, self.market, self.model, dividend)
 
-    def get_direction(self, node, direction):
+    # Gestion des directions
+    def get_direction(self, node: Node, direction: int) -> None:
         self.current_node = node
         match direction:
             case 1:
@@ -83,14 +92,16 @@ class NodeCreation:
                 self.next_opposite_direction = "next_up"
                 self.node_opposite_direction = "node_up"
 
-    def get_parameters(self, node_direction, next_direction, dividend):
+    # Modification des parmètres pour la création des nœuds
+    def get_parameters(self, node_direction: str, next_direction: str, dividend: float) -> None:
         self.check_node = getattr(self.current_node, next_direction)
         self.current_node = getattr(self.current_node, node_direction)
         self.fwd_price = self.current_node.forward(self.market, self.model) - dividend
         if self.fwd_price < 0:
             raise ValueError(f"Error, negative forward {self} !")
 
-    def create_nodes_and_check_is_close(self, node, dividend, direction):
+    # Création des noeuds en fonction de is_close
+    def create_nodes_and_check_is_close(self, node: Node, dividend: float, direction: int) -> None:
         self.get_direction(node, direction)
         # Boucle pour parcourir tous les nœuds au-dessus/dessous par rapport au nœud entré (nœud root)
         while getattr(self.current_node, self.node_direction) is not None:
@@ -111,7 +122,8 @@ class NodeCreation:
                 self.current_node.calculate_proba(self.alpha, self.market, self.model,
                                                   dividend)  # Calculer les probas du nœud sur lequel on travaille
 
-    def all_in_next_mid(self, check, direction):
+    # Conservation des propriétés dans le next_mid (pruning)
+    def all_in_next_mid(self, check: int, direction: int) -> None:
         match check:
             case 0:
                 self.current_node.next_mid = self.check_node
@@ -125,7 +137,8 @@ class NodeCreation:
             case -1:
                 self.current_node.next_mid = getattr(self.check_node, self.node_opposite_direction)
 
-    def create_nodes(self, node, direction):
+    # Création des nœuds
+    def create_nodes(self, node: Node, direction: int) -> None:
         self.get_direction(node, direction)
         # Boucle pour parcourir tous les noeuds au dessus/dessous par rapport au noeud entré (noeud root)
         while getattr(self.current_node, self.node_direction) is not None:
@@ -138,7 +151,8 @@ class NodeCreation:
                 self.when_is_close(direction)
                 self.current_node.calculate_proba(self.alpha, self.market, self.model, 0)
 
-    def is_close(self, node, fwd_price):
+    # Check si le forward d'un nœud est close, au-dessus ou en dessous d'un nœud suivant
+    def is_close(self, node: Node, fwd_price: float) -> int:
         up_price = node.spot * ((1 + self.alpha) / 2)
         down_price = node.spot * ((1 + 1 / self.alpha) / 2)
         if fwd_price < down_price:
@@ -148,7 +162,7 @@ class NodeCreation:
         else:
             return 1
 
-    def when_is_close(self, direction):
+    def when_is_close(self, direction: int) -> None:
         """
         is_close = True self.check_node est bien le next_mid de self.current_node
         on crée le next_up/next_down de self.current_node
@@ -161,7 +175,7 @@ class NodeCreation:
         setattr(self.check_node, self.node_direction, new_node)
         setattr(new_node, self.node_opposite_direction, self.check_node)
 
-    def when_outside(self, direction):
+    def when_outside(self, direction: int) -> None:
         """
         on crée des noeuds vers le haut mais fwd est tjs > check_node
         ou bien on crée des neuds vers le bas mais fwd tjs < check_node
@@ -177,7 +191,7 @@ class NodeCreation:
         setattr(self.transition_node, self.node_direction, self.check_node)
         self.when_is_close(direction)
 
-    def still_outside(self, direction):
+    def still_outside(self, direction: int) -> None:
         memory_node = self.transition_node
         while self.is_close(self.check_node, self.fwd_price) - direction == 1:
             self.steps_over_nodes = True
@@ -186,7 +200,7 @@ class NodeCreation:
         setattr(self.transition_node, self.node_opposite_direction, memory_node)
         setattr(memory_node, self.node_direction, self.transition_node)
 
-    def when_inside(self):
+    def when_inside(self) -> None:
         """
          on crée vers le haut mais fwd < check_node ou vers le bas mais fwd > check_node
          les 3 nexts de current_node sont les mêmes que les trois nexts de current_node.node_down (cas vers le haut) ou current_node.node_up (cas vers le bas)

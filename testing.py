@@ -1,19 +1,14 @@
-import numpy as np
 from scipy.stats import norm
 import matplotlib.pyplot as plt
-from node import Node
-from tqdm import tqdm
-from model import Model
-from option import Option
 from market import Market
+from model import Model
+from tqdm import tqdm
+from option import Option
 from tree import Tree
 from printTree import *
-from datetime import date
-import time
-import sys
 
 
-def black_scholes(S, K, T, r, sigma, option_type):
+def black_scholes(S: float, K: float, T: float, r: float, sigma: float, option_type: str) -> float:
     """
     S: Current stock price
     X: Option strike price
@@ -36,34 +31,34 @@ def black_scholes(S, K, T, r, sigma, option_type):
     return option_price
 
 
-def function_of_k(print_fct_k, option, pruning, threshold, model, market):
+def calculate_prices(K: float, model: Model, market: Market, option: Option, pruning: bool,
+                     threshold: float) -> (float,float):
+    tree = Tree(model, market, option, pruning, threshold)
+    root = Node(market.spot, 1)
+    tree.create_tree(root)
+    tree_price = root.price(option, tree)
+    bs_price = black_scholes(root.spot, K, model.t_step * model.steps_nb, market.rate, market.vol, option.call_put)
+    return tree_price, bs_price
+
+
+def function_of_k(print_fct_k: bool, option: Option, pruning: bool, threshold: float,
+                  model: Model, market: Market) -> None:
     if print_fct_k:
         entered_k = option.K
         market.div = {}
         # Création de listes pour stocker les valeurs
-        k_values = []
-        bs_prices = []
-        tree_prices = []
-        diffs = []
+        k_values, bs_prices, tree_prices, diffs = [], [], [], []
 
         for K in tqdm(range(round(market.spot/2), round(market.spot*1.8))):
             option.K = K
-            # Initialisation de l'arbre et du premier nœud
-            tree = Tree(model, market, option, pruning, threshold)
-            root = Node(market.spot, 1)
-            # Construction de l'arbre
-            tree.create_tree(root)
-            tree_price = root.price(option, tree)
-
-            # Calcul du prix avec BS
-            bs_price = black_scholes(root.spot, K, model.t_step * model.steps_nb, market.rate, market.vol, option.call_put)
-            diff = tree_price - bs_price
+            # Calcul des prix avec l'arbre et BS
+            tree_price, bs_price = calculate_prices(K, model, market, option, pruning, threshold)
 
             # Ajouter les valeurs aux listes
             k_values.append(K)
             bs_prices.append(bs_price)
             tree_prices.append(tree_price)
-            diffs.append(diff)
+            diffs.append(tree_price - bs_price)
 
         # Affichage du graphique
         plt.figure(num=1, figsize=(10, 5))
@@ -94,36 +89,25 @@ def function_of_k(print_fct_k, option, pruning, threshold, model, market):
         option.K = entered_k  # remettre le k de base
 
 
-def function_of_step(print_fct_step, option, pruning, threshold, model, market):
+def function_of_step(print_fct_step: bool, option: Option, pruning: bool, threshold: float, model: Model,
+                     market: Market) -> None:
     if print_fct_step:
         entered_step = model.steps_nb
         market.div = {}
         # Création de listes pour stocker les valeurs
-        step_values = []
-        bs_prices = []
-        tree_prices = []
-        diffs = []
+        step_values, bs_prices, tree_prices, diffs = [], [], [], []
 
         for steps_nb in tqdm(range(1, 500)):
             model.steps_nb = steps_nb
             model.t_step = model.calculate_t_step()
-
-            # Initialisation de l'arbre et du premier nœud
-            tree = Tree(model, market, option, pruning, threshold)
-            root = Node(market.spot, 1)
-            # Construction de l'arbre
-            tree.create_tree(root)
-            tree_price = root.price(option, tree)
-
-            # Calcul du prix avec BS
-            bs_price = black_scholes(root.spot, option.K, model.t_step * model.steps_nb, market.rate, market.vol, option.call_put)
-            diff = (tree_price - bs_price) * steps_nb
+            # Calcul des prix avec l'arbre et BS
+            tree_price, bs_price = calculate_prices(option.K, model, market, option, pruning, threshold)
 
             # Ajouter les valeurs aux listes
             step_values.append(steps_nb)
             bs_prices.append(bs_price)
             tree_prices.append(tree_price)
-            diffs.append(diff)
+            diffs.append((tree_price - bs_price) * steps_nb)
 
         # Affichage du graphique
         plt.figure(num=2, figsize=(10, 5))
@@ -137,4 +121,3 @@ def function_of_step(print_fct_step, option, pruning, threshold, model, market):
         plt.show()
 
         model.steps_nb = entered_step
-

@@ -1,12 +1,6 @@
 # Importation des modules
-from node import Node
-from model import Model
-from option import Option
-from market import Market
-from tree import Tree
 from testing import *
 from printTree import *
-from datetime import date
 import time
 import sys
 import xlwings as xw
