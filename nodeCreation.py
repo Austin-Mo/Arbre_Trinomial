@@ -140,18 +140,17 @@ class NodeCreation:
     # Création des nœuds
     def create_nodes(self, node: Node, direction: int) -> None:
         self.get_direction(node, direction)
-        # Boucle pour parcourir tous les noeuds au dessus/dessous par rapport au noeud entré (noeud root)
+        # Boucle pour parcourir tous les noeuds au-dessus/dessous par rapport au noeud entré (noeud root)
         while getattr(self.current_node, self.node_direction) is not None:
             self.get_parameters(self.node_direction, self.next_direction, 0)
             # Use the dictionary to execute the appropriate code block
             if getattr(self.current_node, self.node_direction) is None and self.current_node.p_transition < self.threshold:
                 self.current_node.next_mid = self.check_node
-
             else:
                 self.when_is_close(direction)
                 self.current_node.calculate_proba(self.alpha, self.market, self.model, 0)
 
-    # Check si le forward d'un nœud est close, au-dessus ou en dessous d'un nœud suivant
+    # Check si le forward d'un nœud est proche, au-dessus ou en dessous d'un nœud suivant
     def is_close(self, node: Node, fwd_price: float) -> int:
         up_price = node.spot * ((1 + self.alpha) / 2)
         down_price = node.spot * ((1 + 1 / self.alpha) / 2)

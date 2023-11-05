@@ -12,7 +12,8 @@ class Tree:
         self.market = market
         self.option = option
         self.pruning = pruning
-        self.NodeCreation = NodeCreation(self.market, self.model, self.pruning, threshold)
+        self.threshold = threshold
+        self.NodeCreation = NodeCreation(self.market, self.model, self.pruning, self.threshold)
 
     def create_tree(self, root: Node) -> None:
         for i in range(self.model.steps_nb):
